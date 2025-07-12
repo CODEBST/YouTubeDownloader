@@ -6,7 +6,7 @@
 
 A user-friendly GUI application for downloading YouTube videos and playlists with progress tracking and speed control.
 
-![Application Screenshot](screenshot.png) *(Replace with actual screenshot)*
+
 
 ## Features
 
