@@ -2,111 +2,162 @@ import yt_dlp
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import threading
+import time
+from datetime import datetime, timedelta
 
 
-class YouTubeDownloader:
-    def __init__(self):
-        self.downloaded_videos = 0
-        self.total_videos = 0
-        self.window = tk.Tk()
-        self.window.geometry("600x400")
-        self.window.title("YouTube Downloader (с прогрессом загрузки)")
+def download_video():
+    url = entry_url.get()
+    save_path = entry_path.get()
+    speed_limit = entry_speed.get()  # Получаем значение скорости
 
-        self.create_widgets()
+    if not url or not save_path:
+        messagebox.showerror("Ошибка", "Укажите URL и путь сохранения!")
+        return
 
-    def create_widgets(self):
-        frame = ttk.Frame(self.window, padding="20")
-        frame.pack(fill=tk.BOTH, expand=True)
+    def run_download():
+        button_download.config(state=tk.DISABLED)
+        progress_bar.start()
 
-        # Поля для URL и пути
-        ttk.Label(frame, text="URL плейлиста/видео:").grid(row=0, column=0, sticky=tk.W)
-        self.entry_url = ttk.Entry(frame, width=50)
-        self.entry_url.grid(row=0, column=1, pady=5, padx=5)
-        self.entry_url.insert(0, "https://youtube.com/playlist?list=...")
+        # Создаем переменные для хранения информации о прогрессе
+        download_info = {
+            'start_time': None,
+            'last_downloaded': 0,
+            'last_time': None,
+            'current_speed': 0,
+            'video_title': "Инициализация..."
+        }
 
-        ttk.Label(frame, text="Путь сохранения:").grid(row=1, column=0, sticky=tk.W)
-        self.entry_path = ttk.Entry(frame, width=50)
-        self.entry_path.grid(row=1, column=1, pady=5, padx=5)
-        self.entry_path.insert(0, "D:/downloads")
+        def update_progress(d):
+            if d['status'] == 'downloading':
+                # Обновляем название видео
+                if '_filename' in d:
+                    filename = d['_filename'].split('.')[0]  # Убираем расширение
+                    download_info['video_title'] = filename
 
-        ttk.Button(frame, text="Обзор", command=self.browse_path).grid(row=1, column=2, padx=5)
+                # Рассчитываем скорость и время до завершения
+                if download_info['start_time'] is None:
+                    download_info['start_time'] = time.time()
+                    download_info['last_time'] = time.time()
+                    download_info['last_downloaded'] = d.get('downloaded_bytes', 0)
+                else:
+                    now = time.time()
+                    time_elapsed = now - download_info['last_time']
 
-        # Ограничение скорости
-        ttk.Label(frame, text="Ограничение скорости (КБ/с):").grid(row=2, column=0, sticky=tk.W)
-        self.entry_speed = ttk.Entry(frame, width=10)
-        self.entry_speed.grid(row=2, column=1, sticky=tk.W, pady=5, padx=5)
-        self.entry_speed.insert(0, "100")
+                    if time_elapsed > 0.5:  # Обновляем статистику каждые 0.5 сек
+                        downloaded = d.get('downloaded_bytes', 0)
+                        delta_bytes = downloaded - download_info['last_downloaded']
+                        download_info['current_speed'] = delta_bytes / time_elapsed
 
-        # Кнопка загрузки
-        self.button_download = ttk.Button(frame, text="Скачать", command=self.start_download)
-        self.button_download.grid(row=3, column=1, pady=10)
+                        # Обновляем UI
+                        window.after(0, update_ui, download_info, d)
 
-        # Прогресс-бар
-        self.progress_bar = ttk.Progressbar(frame, mode="indeterminate", length=400)
-        self.progress_bar.grid(row=4, column=0, columnspan=3, pady=10)
+                        download_info['last_time'] = now
+                        download_info['last_downloaded'] = downloaded
 
-        # Лейбл статуса загрузки
-        self.status_label = ttk.Label(frame, text="Скачано: 0/0", font=('Arial', 10))
-        self.status_label.grid(row=5, column=0, columnspan=3)
+        def update_ui(info, d):
+            # Обновляем название видео
+            label_video.config(text=f"Скачивается: {info['video_title']}")
 
-    def start_download(self):
-        threading.Thread(target=self.download_video, daemon=True).start()
+            # Рассчитываем оставшееся время
+            if info['current_speed'] > 0:
+                total_bytes = d.get('total_bytes', 0)
+                if total_bytes:
+                    remaining_bytes = total_bytes - info['last_downloaded']
+                    remaining_time = remaining_bytes / info['current_speed']
 
-    def download_video(self):
-        self.downloaded_videos = 0
-        self.total_videos = 0
-        self.button_download.config(state=tk.DISABLED)
-        self.progress_bar.start()
-        self.update_status_label()
-
-        url = self.entry_url.get()
-        save_path = self.entry_path.get()
-        speed_limit = self.entry_speed.get()
+                    # Форматируем время в ЧЧ:ММ:СС
+                    if remaining_time > 0:
+                        remaining_str = str(timedelta(seconds=int(remaining_time)))
+                        label_time.config(text=f"Осталось: {remaining_str}")
+                    else:
+                        label_time.config(text="Осталось: вычисление...")
+                else:
+                    label_time.config(text="Осталось: неизвестно")
+            else:
+                label_time.config(text="Осталось: вычисление...")
 
         ydl_opts = {
             'outtmpl': f'{save_path}/%(title)s.%(ext)s',
             'format': 'bestvideo+bestaudio/best',
             'ignoreerrors': True,
-            'ratelimit': int(speed_limit) * 1024 if speed_limit else None,
-            'progress_hooks': [self.update_progress],
-            'quiet': True,
+            'progress_hooks': [update_progress],
+            'ratelimit': int(speed_limit) * 1024 if speed_limit else None,  # Переводим КБ/с в Б/с
         }
 
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=False)
-                if 'entries' in info:
-                    self.total_videos = len(info['entries'])
-                else:
-                    self.total_videos = 1
-                self.update_status_label()
                 ydl.download([url])
             messagebox.showinfo("Успех", "Загрузка завершена!")
         except Exception as e:
             messagebox.showerror("Ошибка", f"Ошибка загрузки: {e}")
         finally:
-            self.progress_bar.stop()
-            self.button_download.config(state=tk.NORMAL)
+            progress_bar.stop()
+            button_download.config(state=tk.NORMAL)
+            label_video.config(text="Скачивается: ---")
+            label_time.config(text="Осталось: ---")
 
-    def update_progress(self, d):
-        if d['status'] == 'finished':
-            self.downloaded_videos += 1
-            self.update_status_label()
-
-    def update_status_label(self):
-        self.status_label.config(text=f"Скачано: {self.downloaded_videos}/{self.total_videos}")
-        self.window.update_idletasks()
-
-    def browse_path(self):
-        folder = filedialog.askdirectory()
-        if folder:
-            self.entry_path.delete(0, tk.END)
-            self.entry_path.insert(0, folder)
-
-    def run(self):
-        self.window.mainloop()
+    # Запуск в отдельном потоке
+    threading.Thread(target=run_download, daemon=True).start()
 
 
-if __name__ == "__main__":
-    app = YouTubeDownloader()
-    app.run()
+def browse_path():
+    folder = filedialog.askdirectory()
+    if folder:
+        entry_path.delete(0, tk.END)
+        entry_path.insert(0, folder)
+
+
+# Настройка окна
+window = tk.Tk()
+window.geometry("600x400")
+window.title("YouTube Downloader")
+
+# Виджеты
+frame = ttk.Frame(window, padding="20")
+frame.pack(fill=tk.BOTH, expand=True)
+
+# Поле для URL
+label_url = ttk.Label(frame, text="URL плейлиста/видео:")
+label_url.grid(row=0, column=0, sticky=tk.W)
+
+entry_url = ttk.Entry(frame, width=50)
+entry_url.grid(row=0, column=1, pady=5, padx=5)
+entry_url.insert(0, "https://youtube.com/playlist?list=...")
+
+# Поле для пути сохранения
+label_path = ttk.Label(frame, text="Путь сохранения:")
+label_path.grid(row=1, column=0, sticky=tk.W)
+
+entry_path = ttk.Entry(frame, width=50)
+entry_path.grid(row=1, column=1, pady=5, padx=5)
+entry_path.insert(0, "D:/downloads")
+
+button_browse = ttk.Button(frame, text="Обзор", command=browse_path)
+button_browse.grid(row=1, column=2, padx=5)
+
+# Поле для ограничения скорости (в КБ/с)
+label_speed = ttk.Label(frame, text="Ограничение скорости (КБ/с):")
+label_speed.grid(row=2, column=0, sticky=tk.W)
+
+entry_speed = ttk.Entry(frame, width=10)
+entry_speed.grid(row=2, column=1, sticky=tk.W, pady=5, padx=5)
+entry_speed.insert(0, "100")  # Значение по умолчанию (100 КБ/с)
+
+# Кнопка загрузки
+button_download = ttk.Button(frame, text="Скачать", command=download_video)
+button_download.grid(row=3, column=1, pady=20)
+
+# Информация о текущем видео
+label_video = ttk.Label(frame, text="Скачивается: ---")
+label_video.grid(row=4, column=0, columnspan=3, pady=5)
+
+# Время до окончания
+label_time = ttk.Label(frame, text="Осталось: ---")
+label_time.grid(row=5, column=0, columnspan=3, pady=5)
+
+# Прогресс-бар
+progress_bar = ttk.Progressbar(frame, mode="indeterminate", length=400)
+progress_bar.grid(row=6, column=0, columnspan=3)
+
+window.mainloop()
